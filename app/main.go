@@ -1,14 +1,13 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
-)
 
-// Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
-var _ = net.Listen
-var _ = os.Exit
+	internal "github.com/codecrafters-io/kafka-starter-go/app/internal"
+)
 
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -19,9 +18,27 @@ func main() {
 		fmt.Println("Failed to bind to port 9092")
 		os.Exit(1)
 	}
-	_, err = l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			os.Exit(1)
+		}
+
+		handleClient(conn)
 	}
+
+}
+
+func handleClient(conn net.Conn) {
+	defer conn.Close()
+
+	buf := make([]byte, 8)
+	msg := internal.NewKafkaMessage()
+
+	// struct cannot be written directly to sockets.
+	// Kafka uses binary encoding (so we wont use json.Marshal)
+	binary.Encode(buf, binary.BigEndian, msg)
+
+	conn.Write(buf)
 }
