@@ -46,22 +46,20 @@ func handleClient(conn net.Conn) {
 		return
 	}
 
-	// struct cannot be written directly to sockets.
-	// Kafka uses binary encoding (so we wont use json.Marshal)
-	// also this is wrong because binary.Encode() cannot encode strings or any type, it only encodes fixed size types.
-	// below will fail silently:
-
-	/*
-		responseBuf := make([]byte, 1024)
-		n, _ = binary.Encode(responseBuf, binary.BigEndian, msg)
-	*/
-
 	// Manual Encoding: since we have to handle strings and we dont know the final size required
 	// buffer will grow and help us
 	resp := bytes.Buffer{}
 	// skip all fields as we only need correlation id to be sent back
 	binary.Write(&resp, binary.BigEndian, msg.MessageSize)
 	binary.Write(&resp, binary.BigEndian, msg.Header.CorrelationID)
+
+	apiResponse := HandleAPIKeys(&msg)
+	if apiResponse == nil {
+		conn.Write([]byte("Unknown API key"))
+		return
+	}
+
+	binary.Write(&resp, binary.BigEndian, apiResponse)
 
 	conn.Write(resp.Bytes())
 }
@@ -158,4 +156,29 @@ func parseKafkaMessage(req []byte) (internal.KafkaMessage, error) {
 	}
 
 	return msg, nil
+}
+
+// data, error
+func RequestAPIVersion(msg *internal.KafkaMessage) internal.APIVersionsResponse {
+	resp := new(internal.APIVersionsResponse)
+	if msg.Header.RequestAPIVersion >= 0 && msg.Header.RequestAPIVersion <= 4 {
+		resp.ErrorCode = 0
+
+	} else {
+		resp.ErrorCode = 35
+	}
+	return *resp
+}
+
+func HandleAPIKeys(msg *internal.KafkaMessage) any {
+	if msg == nil {
+		return nil
+	}
+
+	switch msg.Header.RequestAPIKey {
+	case 18:
+		return RequestAPIVersion(msg)
+	default:
+		return nil
+	}
 }

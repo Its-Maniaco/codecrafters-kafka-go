@@ -24,3 +24,7 @@ func NewKafkaMessage() KafkaMessage {
 		},
 	}
 }
+
+type APIVersionsResponse struct {
+	ErrorCode int16 `json:"error_code"`
+}
