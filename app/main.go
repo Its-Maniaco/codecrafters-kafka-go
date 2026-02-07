@@ -21,88 +21,95 @@ func main() {
 		fmt.Println("Failed to bind to port 9092")
 		os.Exit(1)
 	}
+
 	for {
+		fmt.Println("Accepting....")
 		conn, err := l.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
 
+		fmt.Println("Accepted<><><>")
 		handleClient(conn)
 	}
 
 }
 
 func handleClient(conn net.Conn) {
+	log.Println("Handling client")
 	defer conn.Close()
-	// read incoming header
-	// we need to create buffer long enough for message size (1024 can be limiting)
+	for {
 
-	bufSize := make([]byte, 4)
-	// read first 4 bytes to get message length
-	_, err := io.ReadFull(conn, bufSize)
-	if err != nil {
-		return
-	}
-	msgLen := int32(binary.BigEndian.Uint32(bufSize))
+		// read incoming header
+		// we need to create buffer long enough for message size (1024 can be limiting)
 
-	payload := make([]byte, msgLen)
-	_, err = io.ReadFull(conn, payload)
-	if err != nil {
-		log.Println("Error reading payload:", err)
-		return
-	}
-	// Parse request into Message
-	msg, err := parseKafkaRequest(msgLen, payload)
-	if err != nil {
-		log.Println("error parsing kafka message: ", err)
-		conn.Write([]byte(err.Error()))
-		return
-	}
-
-	// fmt.Println("Kafka Req\t: ", msg)
-
-	resp := bytes.Buffer{}
-
-	apiResponse := HandleAPIKeys(&msg)
-
-	switch v := apiResponse.(type) {
-	case internal.APIVersionsResponseV4:
-		// fmt.Println("v:::", v)
-		binary.Write(&resp, binary.BigEndian, msg.Header.CorrelationID)
-		binary.Write(&resp, binary.BigEndian, v.ErrorCode)
-		lenApiKeys := uint64(len(v.APIKeys) + 1)
-		// Write as unsigned varint for compact array
-		var varintBuf [binary.MaxVarintLen64]byte
-		n := binary.PutUvarint(varintBuf[:], lenApiKeys)
-		resp.Write(varintBuf[:n])
-
-		for _, apiKey := range v.APIKeys {
-			binary.Write(&resp, binary.BigEndian, apiKey.APIKey)
-			binary.Write(&resp, binary.BigEndian, apiKey.MinVersion)
-			binary.Write(&resp, binary.BigEndian, apiKey.MaxVersion)
-			if apiKey.TagBuffer.Data == nil {
-				binary.Write(&resp, binary.BigEndian, uint8(0)) // tag buffer expects one byte
-			} else {
-				//TODO: implement if tag buffer is not empty then write it currently we still write 0
-				binary.Write(&resp, binary.BigEndian, uint8(0))
+		bufSize := make([]byte, 4)
+		// read first 4 bytes to get message length
+		_, err := io.ReadFull(conn, bufSize)
+		if err != nil {
+			if err == io.EOF {
+				break
 			}
+			return
 		}
-		binary.Write(&resp, binary.BigEndian, v.ThrottleTimeMS)
-		binary.Write(&resp, binary.BigEndian, uint8(0)) // tag_buffer
+		msgLen := int32(binary.BigEndian.Uint32(bufSize))
 
-		// now we know the size of message so we write that
-		msgLen := int32(resp.Len())
-		kafkaResp := bytes.Buffer{}
-		binary.Write(&kafkaResp, binary.BigEndian, msgLen)
-		kafkaResp.Write(resp.Bytes())
-		conn.Write(kafkaResp.Bytes())
-		return
-	default:
-		conn.Write([]byte("Unknown API response type"))
+		payload := make([]byte, msgLen)
+		_, err = io.ReadFull(conn, payload)
+		if err != nil {
+			log.Println("Error reading payload:", err)
+			return
+		}
+		// Parse request into Message
+		msg, err := parseKafkaRequest(msgLen, payload)
+		if err != nil {
+			log.Println("error parsing kafka message: ", err)
+			conn.Write([]byte(err.Error()))
+			return
+		}
+
+		// fmt.Println("Kafka Req\t: ", msg)
+
+		resp := bytes.Buffer{}
+
+		apiResponse := HandleAPIKeys(&msg)
+
+		switch v := apiResponse.(type) {
+		case internal.APIVersionsResponseV4:
+			// fmt.Println("v:::", v)
+			binary.Write(&resp, binary.BigEndian, msg.Header.CorrelationID)
+			binary.Write(&resp, binary.BigEndian, v.ErrorCode)
+			lenApiKeys := uint64(len(v.APIKeys) + 1)
+			// Write as unsigned varint for compact array
+			var varintBuf [binary.MaxVarintLen64]byte
+			n := binary.PutUvarint(varintBuf[:], lenApiKeys)
+			resp.Write(varintBuf[:n])
+
+			for _, apiKey := range v.APIKeys {
+				binary.Write(&resp, binary.BigEndian, apiKey.APIKey)
+				binary.Write(&resp, binary.BigEndian, apiKey.MinVersion)
+				binary.Write(&resp, binary.BigEndian, apiKey.MaxVersion)
+				if apiKey.TagBuffer.Data == nil {
+					binary.Write(&resp, binary.BigEndian, uint8(0)) // tag buffer expects one byte
+				} else {
+					//TODO: implement if tag buffer is not empty then write it currently we still write 0
+					binary.Write(&resp, binary.BigEndian, uint8(0))
+				}
+			}
+			binary.Write(&resp, binary.BigEndian, v.ThrottleTimeMS)
+			binary.Write(&resp, binary.BigEndian, uint8(0)) // tag_buffer
+
+			// now we know the size of message so we write that
+			msgLen := int32(resp.Len())
+			kafkaResp := bytes.Buffer{}
+			binary.Write(&kafkaResp, binary.BigEndian, msgLen)
+			kafkaResp.Write(resp.Bytes())
+			conn.Write(kafkaResp.Bytes())
+		default:
+			conn.Write([]byte("Unknown API response type"))
+		}
 	}
-
-	conn.Write(resp.Bytes())
 }
 
 func parseKafkaRequest(msgLen int32, req []byte) (internal.KafkaRequest, error) {
@@ -249,5 +256,3 @@ func HandleAPIKeys(msg *internal.KafkaRequest) any {
 		return nil
 	}
 }
-
-
