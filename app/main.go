@@ -24,6 +24,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		server.HandleClient(conn)
+		go server.HandleClient(conn)
 	}
+
 }
